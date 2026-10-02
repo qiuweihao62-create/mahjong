@@ -62,6 +62,9 @@ input.name{width:100%;text-align:center}
     <span class="hint">底</span><input type="number" id="base">
     <span class="hint">每台</span><input type="number" id="per">
   </div>
+  <div class="row" style="margin-top:8px">
+    <span class="hint">詐胡罰：付給其他每人 底＋</span><input type="number" id="foulTai" min="0"><span class="hint">台的錢（不影響輪莊）</span>
+  </div>
   <label class="hint" style="display:block;margin-top:8px"><input type="checkbox" id="autoDealer"> 自動計算莊家台＋連莊台（莊 1 台，連N拉N 再加 2N 台）</label>
   <div class="hint" style="margin-top:4px">付的錢 ＝ 底 ＋ 台數 × 每台。放槍由放槍者付；自摸由其他三家各付一份。莊家台、連莊台只加在「莊家收錢或莊家付錢」的那一份。</div>
 </div>
@@ -72,9 +75,12 @@ input.name{width:100%;text-align:center}
     <button data-t="ron" class="on">放槍</button>
     <button data-t="tsumo">自摸</button>
     <button data-t="draw">流局</button>
+    <button data-t="foul">詐胡</button>
   </div>
+  <div class="hint" id="editBanner" style="color:var(--red);margin-top:8px;display:none"></div>
   <div id="winBox"><div class="lbl" id="winLbl">胡牌的人</div><div class="row" id="winner"></div></div>
   <div id="loserBox"><div class="lbl">放槍的人</div><div class="row" id="loser"></div></div>
+  <div id="foulBox"><div class="lbl">詐胡原因</div><div class="row" id="foulReasons"></div></div>
   <div id="tileBox">
     <div class="lbl">胡的牌：<b id="tileShow">未選</b></div>
     <div class="tiles" id="tiles"></div>
@@ -86,23 +92,38 @@ input.name{width:100%;text-align:center}
     <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">牌型台數設定（規則不同可自己改）</summary>
       <div id="fanCfg"></div>
       <button id="fanReset" style="margin-top:8px">還原預設台數</button>
+      <div class="lbl">新增自訂牌型（你們自己的玩法）</div>
+      <div class="row">
+        <input id="cfName" placeholder="名稱" style="width:100px">
+        <input type="number" id="cfTai" placeholder="台數" min="0" style="width:70px">
+        <select id="cfGroup"></select>
+        <input type="number" id="cfMax" placeholder="最多點幾次" min="1" value="1" style="width:100px">
+        <button id="cfAdd">新增</button>
+      </div>
     </details>
   </div>
   <div class="preview" id="preview"></div>
   <div class="row" style="margin-top:12px">
     <button id="save" class="on">記錄</button>
+    <button id="cancelEdit" style="display:none">取消修改</button>
     <button id="undo">復原上一局</button>
   </div>
 </div>
 
 <div class="card">
   <h2>統計</h2>
-  <table><thead><tr><th>玩家</th><th>放槍</th><th>胡牌（別人放槍）</th><th>自摸</th><th>籌碼輸贏</th></tr></thead><tbody id="stats"></tbody></table>
+  <table><thead><tr><th>玩家</th><th>放槍</th><th>胡牌（別人放槍）</th><th>自摸</th><th>詐胡</th><th>籌碼輸贏</th></tr></thead><tbody id="stats"></tbody></table>
+</div>
+
+<div class="card">
+  <h2>最後結算</h2>
+  <div id="settle"></div>
+  <div class="row" style="margin-top:10px"><button id="copySettle">複製結算文字（可貼到 LINE）</button></div>
 </div>
 
 <div class="card">
   <h2>歷史紀錄<span id="count" class="hint"></span></h2>
-  <table><thead><tr><th>#</th><th>圈/莊</th><th>內容</th><th>牌</th><th>籌碼變化</th></tr></thead><tbody id="log"></tbody></table>
+  <table><thead><tr><th>#</th><th>圈/莊</th><th>內容</th><th>牌</th><th>籌碼變化</th><th></th></tr></thead><tbody id="log"></tbody></table>
   <div class="row" style="margin-top:10px">
     <button id="csv">匯出 CSV</button>
     <button id="reset" class="danger">新牌局（清空）</button>
@@ -177,6 +198,8 @@ const FANS=[
 const def={names:["玩家1","玩家2","玩家3","玩家4"],start:0,base:100,per:20,first:0,rounds:[]};
 let S; try{S=Object.assign({},def,JSON.parse(localStorage.getItem(KEY)))}catch(e){S=def}
 let type="ron",winners=[],loser=null,tile=null,manual={};
+const FOUL_REASONS=["沒過水就胡","詐胡（牌型不成立）","其他"];
+let editIdx=null,foulReason=FOUL_REASONS[0];
 const $=id=>document.getElementById(id);
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const num=id=>Math.max(0,+$(id).value||0);
@@ -185,11 +208,24 @@ const num=id=>Math.max(0,+$(id).value||0);
 function replay(rounds=S.rounds){
   let dealer=S.first,lian=0,rot=0;
   rounds.forEach(r=>{
+    if(r.type==="foul")return;   // 詐胡罰款不影響輪莊
     if(r.type==="draw"||winsOf(r).some(w=>w.winner===dealer))lian++;
     else{dealer=(dealer+1)%4;lian=0;rot++}
   });
   return{dealer,lian,rot,wind:WIND[Math.floor(rot/4)%4]};
 }
+// 刪除或修改某一局之後，重新算出每一局當時的莊家、連莊、圈風
+function normalize(){
+  let dealer=S.first,lian=0,rot=0;
+  S.rounds.forEach(r=>{
+    r.dealer=dealer;r.lian=lian;r.wind=WIND[Math.floor(rot/4)%4];
+    if(r.type==="foul")return;
+    if(r.type==="draw"||winsOf(r).some(w=>w.winner===dealer))lian++;
+    else{dealer=(dealer+1)%4;lian=0;rot++}
+  });
+}
+// 目前表單對應的牌局狀態（修改某一局時，用「那一局之前」的狀態）
+const ctx=()=>editIdx!=null?replay(S.rounds.slice(0,editIdx)):replay();
 // 一位付款人付給某位贏家多少
 function payOne(r,payer,w){
   // 莊家台＋連莊台（莊 1 台＋連N拉N 共 2N 台）：只有莊家收錢或莊家付錢的那一份才加
@@ -199,6 +235,11 @@ function payOne(r,payer,w){
 }
 function delta(r){
   const d=[0,0,0,0];
+  if(r.type==="foul"){   // 詐胡：詐胡的人付給其他每人 底＋N台
+    const m=S.base+(S.foulTai??1)*S.per;
+    [0,1,2,3].forEach(i=>{if(i!==r.offender){d[i]+=m;d[r.offender]-=m}});
+    return d;
+  }
   for(const w of winsOf(r)){
     const payers=r.type==="ron"?[r.loser]:[0,1,2,3].filter(i=>i!==w.winner);
     payers.forEach(p=>{const m=payOne(r,p,w).money;d[p]-=m;d[w.winner]+=m});
@@ -220,10 +261,20 @@ function pickRow(el,cur,onPick,exclude){
     b.onclick=()=>onPick(i);el.appendChild(b);
   });
 }
+// 內建牌型加上你們自己新增的牌型
+function allFans(){
+  const base=FANS.map(([g,items])=>[g,items.slice()]);
+  (S.customFans||[]).forEach(c=>{
+    let grp=base.find(([g])=>g===c.group);
+    if(!grp){grp=[c.group,[]];base.push(grp)}
+    grp[1].push([c.name,c.tai,c.max||1]);
+  });
+  return base;
+}
 let fanSel={};   // 贏家編號 → {牌型名稱: 點選次數}
 const taiOf=name=>{
   if(S.fanTai&&S.fanTai[name]!=null)return S.fanTai[name];
-  for(const[,items]of FANS)for(const it of items)if(it[0]===name)return it[1];
+  for(const[,items]of allFans())for(const it of items)if(it[0]===name)return it[1];
   return 0;
 };
 const selOf=w=>fanSel[w]||{};
@@ -233,7 +284,7 @@ const fanList=w=>Object.entries(selOf(w)).filter(([,c])=>c>0);
 const fanText=l=>(l||[]).map(([n,c])=>c>1?`${n}×${c}`:n).join("、");
 const winData=w=>({winner:w,tai:totalTai(w),fans:fanList(w),extra:manual[w]||0});
 // 一局的所有贏家（雙響、三響有多位；舊紀錄只有一位）
-const winsOf=r=>r.type==="draw"?[]:r.wins||[{winner:r.winner,tai:r.tai,fans:r.fans||[],extra:r.extra||0}];
+const winsOf=r=>r.type==="draw"||r.type==="foul"?[]:r.wins||[{winner:r.winner,tai:r.tai,fans:r.fans||[],extra:r.extra||0}];
 // 不能同時存在的牌型（點選其中一個時，會自動取消另一個）
 const EXCL_GROUPS=[
   ["混一色","清一色","字一色"],
@@ -265,7 +316,7 @@ function pickMulti(el,onPick){
 function renderFans(){
   const el=$("fans");el.innerHTML="";
   if(!winners.length){el.innerHTML='<div class="hint">先選贏家，再點牌型。</div>';return}
-  const st=replay();
+  const st=ctx();
   winners.forEach(w=>{
     const wrap=document.createElement("div");el.appendChild(wrap);
     if(winners.length>1)wrap.style.cssText="border-top:1px solid var(--line);margin-top:12px;padding-top:2px";
@@ -278,7 +329,7 @@ function renderFans(){
       +(S.autoDealer!==false?`　莊家：${S.names[st.dealer]}，莊家台＋連莊台共 ${1+2*st.lian} 台（只加在莊家收或付的那一份，自動算）`:"");
     wrap.appendChild(wi);
     if(fanNote[w]){const nt=document.createElement("div");nt.className="hint";nt.style.color="var(--red)";nt.textContent=fanNote[w];wrap.appendChild(nt)}
-    FANS.forEach(([g,items])=>{
+    allFans().forEach(([g,items])=>{
       const h=document.createElement("div");h.className="fgrp";h.textContent=g;wrap.appendChild(h);
       const row=document.createElement("div");row.className="chips";wrap.appendChild(row);
       items.forEach(([name,,max=1])=>{
@@ -310,23 +361,83 @@ function renderFans(){
 }
 function buildCfg(){
   const el=$("fanCfg");el.className="cfg";el.innerHTML="";
-  FANS.forEach(([,items])=>items.forEach(([name,def])=>{
+  const groups=allFans(),custom=new Set((S.customFans||[]).map(c=>c.name));
+  groups.forEach(([,items])=>items.forEach(([name])=>{
     const l=document.createElement("label");
-    l.innerHTML=`<span>${name}</span><input type="number" min="0" value="${taiOf(name)}">`;
+    l.innerHTML=`<span>${name}</span><span style="display:flex;gap:4px;align-items:center"><input type="number" min="0" value="${taiOf(name)}">${custom.has(name)?'<button class="danger" title="刪除這個自訂牌型">✕</button>':""}</span>`;
     l.querySelector("input").onchange=e=>{
       S.fanTai=S.fanTai||{};S.fanTai[name]=Math.max(0,+e.target.value||0);save();render();
     };
+    const del=l.querySelector("button");
+    if(del)del.onclick=()=>{
+      if(!confirm(`刪除自訂牌型「${name}」？（以前的紀錄不受影響）`))return;
+      S.customFans=S.customFans.filter(c=>c.name!==name);
+      Object.values(fanSel).forEach(s=>delete s[name]);
+      save();buildCfg();render();
+    };
     el.appendChild(l);
   }));
+  const gs=$("cfGroup");gs.innerHTML="";
+  [...new Set([...groups.map(g=>g[0]),"自訂"])].forEach(g=>{
+    const o=document.createElement("option");o.value=o.textContent=g;gs.appendChild(o);
+  });
 }
 function draftRound(){
-  const st=replay();
+  const st=ctx();
   return{type,loser,dealer:st.dealer,lian:st.lian,wins:winners.map(winData)};
+}
+const gameLabel=i=>S.rounds[i].type==="foul"?"這筆詐胡":`第 ${S.rounds.slice(0,i+1).filter(x=>x.type!=="foul").length} 局`;
+function clearForm(){winners=[];loser=null;tile=null;fanSel={};manual={};fanNote={}}
+// 把某一局載回表單修改
+function editRound(i){
+  const r=S.rounds[i];
+  clearForm();
+  type=r.type;loser=r.loser??null;tile=r.tile||null;
+  if(r.type==="foul"){winners=[r.offender];foulReason=r.reason||FOUL_REASONS[0]}
+  else winners=winsOf(r).map(w=>w.winner);
+  winsOf(r).forEach(w=>{fanSel[w.winner]=Object.fromEntries(w.fans||[]);manual[w.winner]=w.extra||0});
+  editIdx=i;render();
+  $("type").scrollIntoView({behavior:"smooth",block:"center"});
+}
+function delRound(i){
+  if(!confirm(`刪除${gameLabel(i)}？之後所有局的莊家、連莊、金額會重新計算。`))return;
+  S.rounds.splice(i,1);
+  if(editIdx===i){editIdx=null;clearForm()}else if(editIdx!=null&&editIdx>i)editIdx--;
+  normalize();save();render();
+}
+// 最後結算：用最少的轉帳次數，算出誰付給誰
+function settle(){
+  const bal=balances().map((v,i)=>[i,v-(+S.start||0)]);
+  const cr=bal.filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+  const db=bal.filter(x=>x[1]<0).map(x=>[x[0],-x[1]]).sort((a,b)=>b[1]-a[1]);
+  const out=[];let i=0,j=0;
+  while(i<db.length&&j<cr.length){
+    const m=Math.min(db[i][1],cr[j][1]);
+    out.push([db[i][0],cr[j][0],m]);
+    db[i][1]-=m;cr[j][1]-=m;
+    if(!db[i][1])i++;
+    if(!cr[j][1])j++;
+  }
+  return out;
+}
+function settleText(){
+  const bal=balances(),nf=S.rounds.filter(r=>r.type!=="foul").length,tr=settle();
+  const lines=[`🀄 麻將結算（共 ${nf} 局，底${S.base}、每台${S.per}）`];
+  S.names.forEach((n,i)=>lines.push(`${n} ${fmt(bal[i]-(+S.start||0))}`));
+  lines.push("",tr.length?"付款：":"大家打平，不用付款");
+  tr.forEach(([a,b,m])=>lines.push(`${S.names[a]} → ${S.names[b]}　${m}`));
+  return lines.join("\n");
+}
+function renderSettle(){
+  const tr=settle();
+  $("settle").innerHTML=tr.length
+    ?tr.map(([a,b,m])=>`<div style="font-size:17px;padding:4px 0"><b>${S.names[a]}</b> → <b>${S.names[b]}</b>　<span class="pos">${m}</span></div>`).join("")
+    :'<div class="hint">目前沒有人需要付款。</div>';
 }
 
 function render(){
   const st=replay(),bal=balances();
-  $("status").textContent=`${st.wind}風圈　莊家：${S.names[st.dealer]}${st.lian?`（連莊 ${st.lian}）`:""}　第 ${S.rounds.length+1} 局`;
+  $("status").textContent=`${st.wind}風圈　莊家：${S.names[st.dealer]}${st.lian?`（連莊 ${st.lian}）`:""}　第 ${S.rounds.filter(r=>r.type!=="foul").length+1} 局`;
   $("players").innerHTML="";
   S.names.forEach((n,i)=>{
     const d=document.createElement("div");d.className="p"+(i===st.dealer?" dealer":"");
@@ -347,14 +458,28 @@ function render(){
   });
   $("start").value=S.start;$("base").value=S.base;$("per").value=S.per;
   $("autoDealer").checked=S.autoDealer!==false;
+  $("foulTai").value=S.foulTai??1;
 
   document.querySelectorAll("#type button").forEach(b=>b.className=b.dataset.t===type?"on":"");
-  const draw=type==="draw",tsumo=type==="tsumo";
-  $("winBox").style.display=$("tileBox").style.display=$("taiBox").style.display=draw?"none":"";
+  const draw=type==="draw",tsumo=type==="tsumo",foul=type==="foul",single=tsumo||foul;
+  $("winBox").style.display=draw?"none":"";
+  $("tileBox").style.display=$("taiBox").style.display=(draw||foul)?"none":"";
   $("loserBox").style.display=type==="ron"?"":"none";
-  $("winLbl").textContent=tsumo?"自摸的人":"胡牌的人（雙響、三響可以選多人）";
+  $("foulBox").style.display=foul?"":"none";
+  $("winLbl").textContent=foul?"詐胡的人":tsumo?"自摸的人":"胡牌的人（雙響、三響可以選多人）";
+  $("foulReasons").innerHTML="";
+  FOUL_REASONS.forEach(x=>{
+    const b=document.createElement("button");b.textContent=x;if(x===foulReason)b.className="on";
+    b.onclick=()=>{foulReason=x;render()};$("foulReasons").appendChild(b);
+  });
+  const editing=editIdx!=null;
+  $("editBanner").style.display=editing?"":"none";
+  if(editing)$("editBanner").textContent=`正在修改：${gameLabel(editIdx)}（儲存後，之後所有局的莊家、連莊、金額都會重新計算）`;
+  $("save").textContent=editing?"儲存修改":"記錄";
+  $("cancelEdit").style.display=editing?"":"none";
+  $("undo").style.display=editing?"none":"";
   pickMulti($("winner"),i=>{
-    if(tsumo)winners=[i];
+    if(single)winners=[i];
     else if(winners.includes(i))winners=winners.filter(x=>x!==i);
     else winners=[...winners,i];
     render();
@@ -368,13 +493,17 @@ function render(){
   renderFans();
 
   // 預覽
-  let pv="";
-  if(draw)pv=`流局：不動籌碼，${S.names[st.dealer]} 連莊（連莊數 ${st.lian+1}）。`;
+  let pv="";const cx=ctx();
+  if(draw)pv=`流局：不動籌碼，${S.names[cx.dealer]} 連莊（連莊數 ${cx.lian+1}）。`;
+  else if(foul){
+    if(!winners.length)pv="選好詐胡的人，這裡會顯示罰款。";
+    else{const m=S.base+(S.foulTai??1)*S.per;pv=`${S.names[winners[0]]} 詐胡（${foulReason}）：付給其他每人 ${m}，共 -${m*3}。<br>罰款不影響輪莊，這一局繼續。`}
+  }
   else if(!winners.length||(type==="ron"&&loser===null))pv="選好贏家"+(type==="ron"?"和放槍者":"")+"後，這裡會顯示結算。";
   else{
     const r=draftRound(),d=delta(r),ws=r.wins;
-    const next=ws.some(w=>w.winner===st.dealer)
-      ?`${S.names[st.dealer]} 連莊（連 ${st.lian+1}）`:`換 ${S.names[(st.dealer+1)%4]} 當莊`;
+    const next=ws.some(w=>w.winner===cx.dealer)
+      ?`${S.names[cx.dealer]} 連莊（連 ${cx.lian+1}）`:`換 ${S.names[(cx.dealer+1)%4]} 當莊`;
     const lines=ws.map(w=>{
       const payers=type==="ron"?[loser]:[0,1,2,3].filter(i=>i!==w.winner);
       return`${S.names[w.winner]} 胡 ${w.tai} 台：`+payers.map(p=>{const o=payOne(r,p,w);return`${S.names[p]} 付 ${o.money}`+(o.dt?`（${o.tai} 台，含莊家台連莊台 ${o.dt}）`:"")}).join("、");
@@ -390,22 +519,29 @@ function render(){
     const win=S.rounds.filter(r=>r.type==="ron"&&winsOf(r).some(w=>w.winner===i)).length;
     const zi=S.rounds.filter(r=>r.type==="tsumo"&&winsOf(r).some(w=>w.winner===i)).length;
     const net=bal[i]-(+S.start||0);
+    const fl=S.rounds.filter(r=>r.type==="foul"&&r.offender===i).length;
     const tr=document.createElement("tr");
-    tr.innerHTML=`<td>${n}</td><td>${lose}</td><td>${win}</td><td>${zi}</td><td class="${cls(net)}">${fmt(net)}</td>`;
+    tr.innerHTML=`<td>${n}</td><td>${lose}</td><td>${win}</td><td>${zi}</td><td>${fl}</td><td class="${cls(net)}">${fmt(net)}</td>`;
     $("stats").appendChild(tr);
   });
 
-  $("count").textContent=`（共 ${S.rounds.length} 局）`;
+  const nonFoul=S.rounds.filter(r=>r.type!=="foul").length,fouls=S.rounds.length-nonFoul;
+  $("count").textContent=`（共 ${nonFoul} 局${fouls?`，詐胡 ${fouls} 次`:""}）`;
+  renderSettle();
   $("log").innerHTML="";
-  S.rounds.slice().reverse().forEach((r,k)=>{
-    const n=S.rounds.length-k,d=delta(r),tr=document.createElement("tr");
+  let gn=0;const nums=S.rounds.map(r=>r.type==="foul"?null:++gn);
+  S.rounds.map((r,idx)=>idx).reverse().forEach(idx=>{
+    const r=S.rounds[idx],n=nums[idx],d=delta(r),tr=document.createElement("tr");
     const ws=winsOf(r),multi=ws.length>1?(ws.length===2?"（雙響）":"（三響）"):"";
-    const txt=r.type==="ron"?`${S.names[r.loser]} 放槍給 ${ws.map(w=>S.names[w.winner]).join("、")}${multi}`
+    const txt=r.type==="foul"?`${S.names[r.offender]} 詐胡（${r.reason}）`
+      :r.type==="ron"?`${S.names[r.loser]} 放槍給 ${ws.map(w=>S.names[w.winner]).join("、")}${multi}`
       :r.type==="tsumo"?`${S.names[ws[0].winner]} 自摸`:"流局";
-    const extra=r.type==="draw"?"":ws.map(w=>{const ft=fanText(w.fans);
+    const extra=(r.type==="draw"||r.type==="foul")?"":ws.map(w=>{const ft=fanText(w.fans);
       return`<br><span class="hint">${ws.length>1?S.names[w.winner]+" ":""}${w.tai} 台${ft?`（${ft}${w.extra?`＋手動${w.extra}`:""}）`:""}</span>`}).join("");
     const ch=r.type==="draw"?"—":d.map((v,i)=>v?`<span class="${cls(v)}">${S.names[i]} ${fmt(v)}</span>`:"").filter(Boolean).join("<br>");
-    tr.innerHTML=`<td>${n}</td><td>${r.wind}風<br>${S.names[r.dealer]}莊${r.lian?`連${r.lian}`:""}</td><td>${txt}${extra}</td><td>${r.tile?tileSVG(r.tile,34):""}</td><td>${ch}</td>`;
+    tr.innerHTML=`<td>${n??"罰"}</td><td>${r.wind}風<br>${S.names[r.dealer]}莊${r.lian?`連${r.lian}`:""}</td><td>${txt}${extra}</td><td>${r.tile?tileSVG(r.tile,34):""}</td><td>${ch}</td><td style="white-space:nowrap"><button data-e>修改</button> <button class="danger" data-d>刪除</button></td>`;
+    tr.querySelector("[data-e]").onclick=()=>editRound(idx);
+    tr.querySelector("[data-d]").onclick=()=>delRound(idx);
     $("log").appendChild(tr);
   });
 }
@@ -431,7 +567,7 @@ function endDrag(){
   drag=null;
   S.names=order.map(i=>S.names[i]);
   S.first=order.indexOf(S.first);
-  winners=[];loser=null;fanSel={};manual={};fanNote={};
+  clearForm();
   save();render();
 }
 box.addEventListener("pointerup",endDrag);
@@ -439,7 +575,7 @@ box.addEventListener("pointercancel",endDrag);
 
 document.querySelectorAll("#type button").forEach(b=>b.onclick=()=>{
   type=b.dataset.t;loser=null;
-  if(type==="tsumo")winners=winners.slice(0,1);
+  if(type==="tsumo"||type==="foul")winners=winners.slice(0,1);
   render();
 });
 $("fanReset").onclick=()=>{if(confirm("把所有牌型台數還原成預設？")){S.fanTai={};save();buildCfg();render()}};
@@ -447,29 +583,52 @@ $("start").onchange=e=>{S.start=+e.target.value||0;save();render()};
 $("base").onchange=e=>{S.base=+e.target.value||0;save();render()};
 $("per").onchange=e=>{S.per=+e.target.value||0;save();render()};
 $("autoDealer").onchange=e=>{S.autoDealer=e.target.checked;save();render()};
+$("foulTai").onchange=e=>{S.foulTai=Math.max(0,+e.target.value||0);save();render()};
+$("cfAdd").onclick=()=>{
+  const name=$("cfName").value.trim(),tai=Math.max(0,+$("cfTai").value||0),max=Math.max(1,Math.min(9,+$("cfMax").value||1));
+  if(!name)return alert("請輸入牌型名稱");
+  if(allFans().some(([,it])=>it.some(x=>x[0]===name)))return alert("已經有這個名稱了");
+  (S.customFans=S.customFans||[]).push({name,tai,max,group:$("cfGroup").value||"自訂"});
+  save();$("cfName").value="";$("cfTai").value="";$("cfMax").value=1;buildCfg();render();
+};
+$("copySettle").onclick=async()=>{
+  const t=settleText();
+  try{await navigator.clipboard.writeText(t);alert("已複製，可以貼到 LINE")}
+  catch(e){prompt("請全選後複製：",t)}
+};
 $("save").onclick=()=>{
-  if(type!=="draw"){
+  const dr=type==="draw",fl=type==="foul";
+  if(fl){if(!winners.length)return alert("請選詐胡的人")}
+  else if(!dr){
     if(!winners.length)return alert("請選贏家");
     if(type==="ron"&&loser===null)return alert("請選放槍的人");
     if(!tile)return alert("請選胡的牌");
   }
-  const st=replay(),dr=type==="draw";
-  S.rounds.push({type,winner:dr?null:winners[0],loser:type==="ron"?loser:null,tile:dr?null:tile,
-    wins:dr?[]:winners.map(winData),
-    dealer:st.dealer,lian:st.lian,wind:st.wind,time:new Date().toISOString()});
-  save();winners=[];loser=tile=null;fanSel={};manual={};fanNote={};render();
+  const rec={type,winner:dr||fl?null:winners[0],loser:type==="ron"?loser:null,tile:dr||fl?null:tile,
+    wins:dr||fl?[]:winners.map(winData),
+    time:editIdx!=null?S.rounds[editIdx].time:new Date().toISOString()};
+  if(fl){rec.offender=winners[0];rec.reason=foulReason}
+  if(editIdx!=null){S.rounds[editIdx]=rec;editIdx=null}else S.rounds.push(rec);
+  normalize();
+  save();clearForm();render();
 };
+$("cancelEdit").onclick=()=>{editIdx=null;clearForm();render()};
 $("undo").onclick=()=>{if(S.rounds.length&&confirm("復原最後一局？")){S.rounds.pop();save();render()}};
-$("reset").onclick=()=>{if(confirm("清空所有紀錄並開新牌局？（玩家名稱、底台保留）")){S.rounds=[];save();render()}};
+$("reset").onclick=()=>{if(confirm("清空所有紀錄並開新牌局？（玩家名稱、底台保留）")){S.rounds=[];editIdx=null;clearForm();save();render()}};
 $("csv").onclick=()=>{
-  const rows=[["局","時間","圈風","莊家","連莊","類型","贏家","放槍者","牌","台數","牌型",...S.names.map(n=>n+"變化")]];
-  S.rounds.forEach((r,i)=>{const ws=winsOf(r);rows.push([i+1,r.time,r.wind,S.names[r.dealer],r.lian,{ron:"放槍",tsumo:"自摸",draw:"流局"}[r.type],
-    ws.map(w=>S.names[w.winner]).join("/"),r.loser==null?"":S.names[r.loser],r.tile||"",ws.map(w=>w.tai).join("/"),
-    ws.map(w=>(ws.length>1?S.names[w.winner]+":":"")+fanText(w.fans)+(w.extra?`＋手動${w.extra}`:"")).join("；"),...delta(r)])});
+  const rows=[["局","時間","圈風","莊家","連莊","類型","贏家","放槍者/詐胡者","牌","台數","牌型/原因",...S.names.map(n=>n+"變化")]];
+  let gn=0;
+  S.rounds.forEach(r=>{
+    const ws=winsOf(r),f=r.type==="foul";if(!f)gn++;
+    rows.push([f?"罰":gn,r.time,r.wind,S.names[r.dealer],r.lian,{ron:"放槍",tsumo:"自摸",draw:"流局",foul:"詐胡"}[r.type],
+      ws.map(w=>S.names[w.winner]).join("/"),f?S.names[r.offender]:(r.loser==null?"":S.names[r.loser]),r.tile||"",ws.map(w=>w.tai).join("/"),
+      f?r.reason:ws.map(w=>(ws.length>1?S.names[w.winner]+":":"")+fanText(w.fans)+(w.extra?`＋手動${w.extra}`:"")).join("；"),...delta(r)]);
+  });
   const csv="﻿"+rows.map(r=>r.join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download="mahjong.csv";a.click();
 };
+normalize();
 buildCfg();
 render();
 </script>
