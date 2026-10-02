@@ -62,7 +62,8 @@ input.name{width:100%;text-align:center}
     <span class="hint">底</span><input type="number" id="base">
     <span class="hint">每台</span><input type="number" id="per">
   </div>
-  <div class="hint" style="margin-top:4px">付的錢 ＝ 底 ＋ 台數 × 每台。放槍由放槍者付；自摸由其他三家各付一份。</div>
+  <label class="hint" style="display:block;margin-top:8px"><input type="checkbox" id="autoDealer"> 自動計算莊家台＋連莊台（莊 1 台，連N拉N 再加 2N 台）</label>
+  <div class="hint" style="margin-top:4px">付的錢 ＝ 底 ＋ 台數 × 每台。放槍由放槍者付；自摸由其他三家各付一份。莊家台、連莊台只加在「莊家收錢或莊家付錢」的那一份。</div>
 </div>
 
 <div class="card">
@@ -81,7 +82,7 @@ input.name{width:100%;text-align:center}
   <div id="taiBox">
     <div class="lbl">胡的牌型（先選贏家；點一下選取，有「×」的可連點增加數量）</div>
     <div id="fans"></div>
-    <div class="hint">連莊：點幾下就是連幾（連N拉N，每次 2 台）；花牌：點幾下就是幾朵。「門清一摸三」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）請不要同時點。閒家自摸時，莊家會自動多付 1 台。雙響、三響：放槍時選多位贏家，各自點自己的牌型；莊家有胡就連莊。</div>
+    <div class="hint">花牌：點幾下就是幾朵。莊家台、連莊台由程式自動算，不用點。「門清一摸三」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）點新的會自動取消舊的。雙響、三響：放槍時選多位贏家，各自點自己的牌型；莊家有胡就連莊。</div>
     <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">牌型台數設定（規則不同可自己改）</summary>
       <div id="fanCfg"></div>
       <button id="fanReset" style="margin-top:8px">還原預設台數</button>
@@ -167,7 +168,7 @@ function tileSVG(t,h){
 }
 // 牌型與預設台數：[名稱, 每個幾台, 最多點幾次]（各地規則不同，可在頁面上自行修改）
 const FANS=[
-  ["基本",[["莊家",1],["連莊",2,9],["門清",1],["自摸",1],["門清一摸三",3],["全求人",2],["獨聽",1],["平胡",2]]],
+  ["基本",[["門清",1],["自摸",1],["門清一摸三",3],["全求人",2],["獨聽",1],["平胡",2]]],
   ["風牌・三元牌",[["門風",1],["圈風",1],["中刻",1],["發刻",1],["白刻",1]]],
   ["牌型",[["碰碰胡",4],["混一色",4],["清一色",8],["字一色",8],["小三元",4],["大三元",8],["小四喜",8],["大四喜",16],["三暗刻",2],["四暗刻",5],["五暗刻",8]]],
   ["特殊胡法",[["槓上開花",1],["海底撈月",1],["河底撈魚",1],["搶槓",1],["Migi",8],["人胡",8],["地胡",16],["天胡",24]]],
@@ -191,9 +192,10 @@ function replay(rounds=S.rounds){
 }
 // 一位付款人付給某位贏家多少
 function payOne(r,payer,w){
-  // 閒家自摸時，莊家多付 1 台
-  const tai=w.tai+(r.type==="tsumo"&&w.winner!==r.dealer&&payer===r.dealer?1:0);
-  return{tai,money:S.base+tai*S.per};
+  // 莊家台＋連莊台（莊 1 台＋連N拉N 共 2N 台）：只有莊家收錢或莊家付錢的那一份才加
+  const dt=S.autoDealer!==false&&(w.winner===r.dealer||payer===r.dealer)?1+2*r.lian:0;
+  const tai=w.tai+dt;
+  return{tai,dt,money:S.base+tai*S.per};
 }
 function delta(r){
   const d=[0,0,0,0];
@@ -232,6 +234,26 @@ const fanText=l=>(l||[]).map(([n,c])=>c>1?`${n}×${c}`:n).join("、");
 const winData=w=>({winner:w,tai:totalTai(w),fans:fanList(w),extra:manual[w]||0});
 // 一局的所有贏家（雙響、三響有多位；舊紀錄只有一位）
 const winsOf=r=>r.type==="draw"?[]:r.wins||[{winner:r.winner,tai:r.tai,fans:r.fans||[],extra:r.extra||0}];
+// 不能同時存在的牌型（點選其中一個時，會自動取消另一個）
+const EXCL_GROUPS=[
+  ["混一色","清一色","字一色"],
+  ["門清一摸三","門清"],["門清一摸三","自摸"],
+  ["三暗刻","四暗刻","五暗刻"],
+  ["小三元","大三元"],
+  ["小四喜","大四喜"],
+  ["人胡","地胡","天胡"],
+  ["七搶一","八仙過海"],
+];
+// 平胡＝全順子、無字、無花，所以不能和這些同時存在
+const PING_EXCL=["碰碰胡","字一色","混一色","小三元","大三元","小四喜","大四喜","門風","圈風","中刻","發刻","白刻","花牌","花槓","七搶一","八仙過海"];
+function conflictsOf(name){
+  const s=new Set();
+  EXCL_GROUPS.forEach(g=>{if(g.includes(name))g.forEach(x=>{if(x!==name)s.add(x)})});
+  if(name==="平胡")PING_EXCL.forEach(x=>s.add(x));
+  if(PING_EXCL.includes(name))s.add("平胡");
+  return s;
+}
+let fanNote={};   // 贏家編號 → 自動取消的提示
 function pickMulti(el,onPick){
   el.innerHTML="";
   S.names.forEach((n,i)=>{
@@ -243,23 +265,34 @@ function pickMulti(el,onPick){
 function renderFans(){
   const el=$("fans");el.innerHTML="";
   if(!winners.length){el.innerHTML='<div class="hint">先選贏家，再點牌型。</div>';return}
+  const st=replay();
   winners.forEach(w=>{
     const wrap=document.createElement("div");el.appendChild(wrap);
     if(winners.length>1)wrap.style.cssText="border-top:1px solid var(--line);margin-top:12px;padding-top:2px";
-    const ft=fanList(w);
+    const ft=fanList(w),seat=WIND[(w-st.dealer+4)%4];
     const head=document.createElement("div");head.className="status";head.style.cssText="margin:8px 0 0;font-size:16px";
-    head.textContent=`${S.names[w]}：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
+    head.textContent=`${S.names[w]}（${seat}家）：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
     wrap.appendChild(head);
+    const wi=document.createElement("div");wi.className="hint";
+    wi.textContent=`門風＝${seat}　圈風＝${st.wind}`+(seat===st.wind?"（門風圈風同一個風）":"")
+      +(S.autoDealer!==false?`　莊家：${S.names[st.dealer]}，莊家台＋連莊台共 ${1+2*st.lian} 台（只加在莊家收或付的那一份，自動算）`:"");
+    wrap.appendChild(wi);
+    if(fanNote[w]){const nt=document.createElement("div");nt.className="hint";nt.style.color="var(--red)";nt.textContent=fanNote[w];wrap.appendChild(nt)}
     FANS.forEach(([g,items])=>{
       const h=document.createElement("div");h.className="fgrp";h.textContent=g;wrap.appendChild(h);
       const row=document.createElement("div");row.className="chips";wrap.appendChild(row);
       items.forEach(([name,,max=1])=>{
         const c=selOf(w)[name]||0,b=document.createElement("button");
         b.className="chip"+(c?" on":"");
-        b.innerHTML=`${name}${c>1?"×"+c:""}<small>${taiOf(name)}</small>`;
+        const label=name==="門風"?`門風·${seat}`:name==="圈風"?`圈風·${st.wind}`:name;
+        b.innerHTML=`${label}${c>1?"×"+c:""}<small>${taiOf(name)}</small>`;
         b.onclick=()=>{
           const n=c+1>max?0:c+1,sel=fanSel[w]=fanSel[w]||{};
           if(n)sel[name]=n;else delete sel[name];
+          // 新選了一個牌型時，自動取消和它衝突的牌型
+          const removed=[];
+          if(!c&&n)conflictsOf(name).forEach(x=>{if(sel[x]){delete sel[x];removed.push(x)}});
+          if(removed.length)fanNote[w]=`選了「${name}」，已自動取消：${removed.join("、")}`;else delete fanNote[w];
           render();
         };
         row.appendChild(b);
@@ -271,7 +304,7 @@ function renderFans(){
       manual[w]=Math.max(0,+e.target.value||0);render();
       const n=document.querySelector(`[data-man="${w}"]`);if(n)n.focus();
     };
-    mr.querySelector("button").onclick=()=>{delete fanSel[w];render()};
+    mr.querySelector("button").onclick=()=>{delete fanSel[w];delete fanNote[w];render()};
     wrap.appendChild(mr);
   });
 }
@@ -313,6 +346,7 @@ function render(){
     b.onclick=()=>{S.first=i;save();render()};$("first").appendChild(b);
   });
   $("start").value=S.start;$("base").value=S.base;$("per").value=S.per;
+  $("autoDealer").checked=S.autoDealer!==false;
 
   document.querySelectorAll("#type button").forEach(b=>b.className=b.dataset.t===type?"on":"");
   const draw=type==="draw",tsumo=type==="tsumo";
@@ -343,7 +377,7 @@ function render(){
       ?`${S.names[st.dealer]} 連莊（連 ${st.lian+1}）`:`換 ${S.names[(st.dealer+1)%4]} 當莊`;
     const lines=ws.map(w=>{
       const payers=type==="ron"?[loser]:[0,1,2,3].filter(i=>i!==w.winner);
-      return`${S.names[w.winner]} 胡 ${w.tai} 台：`+payers.map(p=>{const o=payOne(r,p,w);return`${S.names[p]} 付 ${o.money}`+(o.tai!==w.tai?`（${o.tai} 台）`:"")}).join("、");
+      return`${S.names[w.winner]} 胡 ${w.tai} 台：`+payers.map(p=>{const o=payOne(r,p,w);return`${S.names[p]} 付 ${o.money}`+(o.dt?`（${o.tai} 台，含莊家台連莊台 ${o.dt}）`:"")}).join("、");
     });
     pv=(ws.length>1?(ws.length===2?"雙響":"三響")+"<br>":"")+lines.join("<br>")
       +`<br>合計：${S.names.map((n,i)=>d[i]?`${n} ${fmt(d[i])}`:"").filter(Boolean).join("　")}<br>下一局：${next}。`;
@@ -397,7 +431,7 @@ function endDrag(){
   drag=null;
   S.names=order.map(i=>S.names[i]);
   S.first=order.indexOf(S.first);
-  winners=[];loser=null;fanSel={};manual={};
+  winners=[];loser=null;fanSel={};manual={};fanNote={};
   save();render();
 }
 box.addEventListener("pointerup",endDrag);
@@ -412,6 +446,7 @@ $("fanReset").onclick=()=>{if(confirm("把所有牌型台數還原成預設？")
 $("start").onchange=e=>{S.start=+e.target.value||0;save();render()};
 $("base").onchange=e=>{S.base=+e.target.value||0;save();render()};
 $("per").onchange=e=>{S.per=+e.target.value||0;save();render()};
+$("autoDealer").onchange=e=>{S.autoDealer=e.target.checked;save();render()};
 $("save").onclick=()=>{
   if(type!=="draw"){
     if(!winners.length)return alert("請選贏家");
@@ -422,7 +457,7 @@ $("save").onclick=()=>{
   S.rounds.push({type,winner:dr?null:winners[0],loser:type==="ron"?loser:null,tile:dr?null:tile,
     wins:dr?[]:winners.map(winData),
     dealer:st.dealer,lian:st.lian,wind:st.wind,time:new Date().toISOString()});
-  save();winners=[];loser=tile=null;fanSel={};manual={};render();
+  save();winners=[];loser=tile=null;fanSel={};manual={};fanNote={};render();
 };
 $("undo").onclick=()=>{if(S.rounds.length&&confirm("復原最後一局？")){S.rounds.pop();save();render()}};
 $("reset").onclick=()=>{if(confirm("清空所有紀錄並開新牌局？（玩家名稱、底台保留）")){S.rounds=[];save();render()}};
