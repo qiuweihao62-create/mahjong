@@ -34,6 +34,13 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 input[type=number]{width:80px}
 input.name{width:100%;text-align:center}
+.fgrp{margin:8px 0 2px;font-size:13px;color:var(--mute)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:4px 10px;font-size:14px}
+.chip small{opacity:.7;margin-left:3px}
+.cfg{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin-top:8px}
+.cfg label{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:14px}
+.cfg input{width:60px;padding:3px 6px}
 .grip{display:block;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--bg);border-radius:6px;font-size:12px;color:var(--mute);margin-bottom:6px;padding:2px 0}
 .p.dragging{opacity:.7;transform:scale(1.06);box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .status{font-size:18px;font-weight:700;margin-bottom:8px}
@@ -72,10 +79,18 @@ input.name{width:100%;text-align:center}
     <div class="tiles" id="tiles"></div>
   </div>
   <div id="taiBox">
+    <div class="lbl">胡的牌型（點一下選取，有「×」的可連點增加數量）</div>
+    <div id="fans"></div>
     <div class="row" style="margin-top:10px">
-      <span class="hint">總台數</span><input type="number" id="tai" min="0" value="0">
-      <span class="hint">（含連莊、自摸、花等，自己加好直接輸入；閒家自摸時，莊家會自動多付 1 台）</span>
+      <span class="hint">另外手動加</span><input type="number" id="tai" min="0" value="0"><span class="hint">台</span>
+      <button id="fanClear">清除牌型</button>
     </div>
+    <div class="status" id="taiSum" style="margin:8px 0 0;font-size:16px"></div>
+    <div class="hint">連莊：點幾下就是連幾（連N拉N，每次 2 台）；花牌：點幾下就是幾朵。「不求人」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）請不要同時點。閒家自摸時，莊家會自動多付 1 台。</div>
+    <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">牌型台數設定（規則不同可自己改）</summary>
+      <div id="fanCfg"></div>
+      <button id="fanReset" style="margin-top:8px">還原預設台數</button>
+    </details>
   </div>
   <div class="preview" id="preview"></div>
   <div class="row" style="margin-top:12px">
@@ -155,6 +170,14 @@ function tileSVG(t,h){
   const size=h?`width="${h*40/54}" height="${h}"`:`style="width:100%;height:auto;display:block"`;
   return `<svg viewBox="0 0 40 54" ${size} xmlns="http://www.w3.org/2000/svg" font-family="'Noto Serif TC','Microsoft JhengHei',serif" role="img" aria-label="${t}"><rect x="1" y="1" width="38" height="52" rx="5" fill="${IV}" stroke="#777" stroke-width="1.2"/>${g}</svg>`;
 }
+// 牌型與預設台數：[名稱, 每個幾台, 最多點幾次]（各地規則不同，可在頁面上自行修改）
+const FANS=[
+  ["基本",[["莊家",1],["連莊",2,9],["門清",1],["自摸",1],["不求人",3],["全求人",2],["獨聽",1],["平胡",2]]],
+  ["風牌・三元牌",[["門風",1],["圈風",1],["中刻",1],["發刻",1],["白刻",1]]],
+  ["牌型",[["碰碰胡",4],["混一色",4],["清一色",8],["字一色",8],["小三元",4],["大三元",8],["小四喜",8],["大四喜",16],["三暗刻",2],["四暗刻",5],["五暗刻",8],["三槓子",2],["四槓子",8]]],
+  ["特殊胡法",[["槓上開花",1],["海底撈月",1],["河底撈魚",1],["搶槓",1],["人胡",8],["地胡",16],["天胡",24]]],
+  ["花牌",[["花牌",1,8],["花槓",2,2],["七搶一",8],["八仙過海",8]]],
+];
 const def={names:["玩家1","玩家2","玩家3","玩家4"],start:0,base:100,per:20,first:0,rounds:[]};
 let S; try{S=Object.assign({},def,JSON.parse(localStorage.getItem(KEY)))}catch(e){S=def}
 let type="ron",winner=null,loser=null,tile=null;
@@ -199,9 +222,50 @@ function pickRow(el,cur,onPick,exclude){
     b.onclick=()=>onPick(i);el.appendChild(b);
   });
 }
+let fanSel={};   // 牌型名稱 → 點選次數
+const taiOf=name=>{
+  if(S.fanTai&&S.fanTai[name]!=null)return S.fanTai[name];
+  for(const[,items]of FANS)for(const it of items)if(it[0]===name)return it[1];
+  return 0;
+};
+const fanTai=()=>Object.entries(fanSel).reduce((s,[n,c])=>s+c*taiOf(n),0);
+const totalTai=()=>fanTai()+num("tai");
+const fanList=()=>Object.entries(fanSel).filter(([,c])=>c>0);
+const fanText=l=>(l||[]).map(([n,c])=>c>1?`${n}×${c}`:n).join("、");
+function renderFans(){
+  const el=$("fans");el.innerHTML="";
+  FANS.forEach(([g,items])=>{
+    const h=document.createElement("div");h.className="fgrp";h.textContent=g;el.appendChild(h);
+    const row=document.createElement("div");row.className="chips";el.appendChild(row);
+    items.forEach(([name,,max=1])=>{
+      const c=fanSel[name]||0,b=document.createElement("button");
+      b.className="chip"+(c?" on":"");
+      b.innerHTML=`${name}${c>1?"×"+c:""}<small>${taiOf(name)}</small>`;
+      b.onclick=()=>{
+        const n=c+1>max?0:c+1;
+        if(n)fanSel[name]=n;else delete fanSel[name];
+        render();
+      };
+      row.appendChild(b);
+    });
+  });
+  const t=totalTai();
+  $("taiSum").textContent=`總台數：${t} 台`+(fanList().length?`（${fanText(fanList())}${num("tai")?`＋手動${num("tai")}`:""}）`:"");
+}
+function buildCfg(){
+  const el=$("fanCfg");el.className="cfg";el.innerHTML="";
+  FANS.forEach(([,items])=>items.forEach(([name,def])=>{
+    const l=document.createElement("label");
+    l.innerHTML=`<span>${name}</span><input type="number" min="0" value="${taiOf(name)}">`;
+    l.querySelector("input").onchange=e=>{
+      S.fanTai=S.fanTai||{};S.fanTai[name]=Math.max(0,+e.target.value||0);save();render();
+    };
+    el.appendChild(l);
+  }));
+}
 function draftRound(){
   const st=replay();
-  return{type,winner,loser,dealer:st.dealer,lian:st.lian,tai:num("tai")};
+  return{type,winner,loser,dealer:st.dealer,lian:st.lian,tai:totalTai()};
 }
 
 function render(){
@@ -239,6 +303,8 @@ function render(){
   TILES.forEach(t=>{const b=document.createElement("button");b.innerHTML=tileSVG(t);b.title=t;b.setAttribute("aria-label",t);if(t===tile)b.className="on";
     b.onclick=()=>{tile=t;render()};$("tiles").appendChild(b)});
 
+  renderFans();
+
   // 預覽
   let pv="";
   if(draw)pv=`流局：不動籌碼，${S.names[st.dealer]} 連莊（連莊數 ${st.lian+1}）。`;
@@ -268,7 +334,8 @@ function render(){
     const n=S.rounds.length-k,d=delta(r),tr=document.createElement("tr");
     const txt=r.type==="ron"?`${S.names[r.loser]} 放槍給 ${S.names[r.winner]}`
       :r.type==="tsumo"?`${S.names[r.winner]} 自摸`:"流局";
-    const extra=r.type==="draw"?"":`<br><span class="hint">${r.tai} 台</span>`;
+    const ft=fanText(r.fans);
+    const extra=r.type==="draw"?"":`<br><span class="hint">${r.tai} 台${ft?`（${ft}${r.extra?`＋手動${r.extra}`:""}）`:""}</span>`;
     const ch=r.type==="draw"?"—":d.map((v,i)=>v?`<span class="${cls(v)}">${S.names[i]} ${fmt(v)}</span>`:"").filter(Boolean).join("<br>");
     tr.innerHTML=`<td>${n}</td><td>${r.wind}風<br>${S.names[r.dealer]}莊${r.lian?`連${r.lian}`:""}</td><td>${txt}${extra}</td><td>${r.tile?tileSVG(r.tile,34):""}</td><td>${ch}</td>`;
     $("log").appendChild(tr);
@@ -304,6 +371,8 @@ box.addEventListener("pointercancel",endDrag);
 
 document.querySelectorAll("#type button").forEach(b=>b.onclick=()=>{type=b.dataset.t;loser=null;render()});
 $("tai").oninput=render;
+$("fanClear").onclick=()=>{fanSel={};render()};
+$("fanReset").onclick=()=>{if(confirm("把所有牌型台數還原成預設？")){S.fanTai={};save();buildCfg();render()}};
 $("start").onchange=e=>{S.start=+e.target.value||0;save();render()};
 $("base").onchange=e=>{S.base=+e.target.value||0;save();render()};
 $("per").onchange=e=>{S.per=+e.target.value||0;save();render()};
@@ -315,19 +384,20 @@ $("save").onclick=()=>{
   }
   const st=replay(),dr=type==="draw";
   S.rounds.push({type,winner:dr?null:winner,loser:type==="ron"?loser:null,tile:dr?null:tile,
-    dealer:st.dealer,lian:st.lian,wind:st.wind,tai:dr?0:num("tai"),time:new Date().toISOString()});
-  save();winner=loser=tile=null;$("tai").value=0;render();
+    dealer:st.dealer,lian:st.lian,wind:st.wind,tai:dr?0:totalTai(),fans:dr?[]:fanList(),extra:dr?0:num("tai"),time:new Date().toISOString()});
+  save();winner=loser=tile=null;fanSel={};$("tai").value=0;render();
 };
 $("undo").onclick=()=>{if(S.rounds.length&&confirm("復原最後一局？")){S.rounds.pop();save();render()}};
 $("reset").onclick=()=>{if(confirm("清空所有紀錄並開新牌局？（玩家名稱、底台保留）")){S.rounds=[];save();render()}};
 $("csv").onclick=()=>{
-  const rows=[["局","時間","圈風","莊家","連莊","類型","贏家","放槍者","牌","台數",...S.names.map(n=>n+"變化")]];
+  const rows=[["局","時間","圈風","莊家","連莊","類型","贏家","放槍者","牌","台數","牌型",...S.names.map(n=>n+"變化")]];
   S.rounds.forEach((r,i)=>rows.push([i+1,r.time,r.wind,S.names[r.dealer],r.lian,{ron:"放槍",tsumo:"自摸",draw:"流局"}[r.type],
-    r.winner===null?"":S.names[r.winner],r.loser===null?"":S.names[r.loser],r.tile||"",r.tai,...delta(r)]));
+    r.winner===null?"":S.names[r.winner],r.loser===null?"":S.names[r.loser],r.tile||"",r.tai,fanText(r.fans)+(r.extra?`＋手動${r.extra}`:""),...delta(r)]));
   const csv="﻿"+rows.map(r=>r.join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download="mahjong.csv";a.click();
 };
+buildCfg();
 render();
 </script>
 </body>
