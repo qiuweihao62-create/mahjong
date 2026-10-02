@@ -32,6 +32,8 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 input[type=number]{width:80px}
 input.name{width:100%;text-align:center}
+.grip{display:block;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;background:var(--bg);border-radius:6px;font-size:12px;color:var(--mute);margin-bottom:6px;padding:2px 0}
+.p.dragging{opacity:.7;transform:scale(1.06);box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .status{font-size:18px;font-weight:700;margin-bottom:8px}
 .hint{color:var(--mute);font-size:13px}
 .preview{background:var(--bg);border-radius:8px;padding:8px 10px;margin-top:10px;font-size:14px}
@@ -70,7 +72,7 @@ input.name{width:100%;text-align:center}
   <div id="taiBox">
     <div class="row" style="margin-top:10px">
       <span class="hint">總台數</span><input type="number" id="tai" min="0" value="0">
-      <span class="hint">（含莊、連莊、自摸、花，自己加好直接輸入）</span>
+      <span class="hint">（含連莊、自摸、花等，自己加好直接輸入；閒家自摸時，莊家會自動多付 1 台）</span>
     </div>
   </div>
   <div class="preview" id="preview"></div>
@@ -122,7 +124,9 @@ function replay(rounds=S.rounds){
 }
 // 一位付款人付給贏家多少
 function payOne(r,payer){
-  return{tai:r.tai,money:S.base+r.tai*S.per};
+  // 閒家自摸時，莊家多付 1 台
+  const tai=r.tai+(r.type==="tsumo"&&r.winner!==r.dealer&&payer===r.dealer?1:0);
+  return{tai,money:S.base+tai*S.per};
 }
 function delta(r){
   const d=[0,0,0,0];
@@ -160,6 +164,8 @@ function render(){
     const seat=WIND[(i-st.dealer+4)%4];
     d.innerHTML=`<span class="badge">${i===st.dealer?"👑 莊家":"　"} · ${seat}家</span><input class="name" value="${n}"><span class="bal ${cls(bal[i]-(+S.start||0))}">${bal[i]}</span>`;
     d.querySelector("input").onchange=e=>{S.names[i]=e.target.value||("玩家"+(i+1));save();render()};
+    d.dataset.i=i;
+    if(!S.rounds.length)d.insertAdjacentHTML("afterbegin",'<span class="grip">⠿ 按住拖曳</span>');
     $("players").appendChild(d);
   });
   // 起莊只能在還沒記錄時更改
@@ -219,6 +225,33 @@ function render(){
     $("log").appendChild(tr);
   });
 }
+
+// 拖曳換座位（只在還沒記錄任何一局時可用，因為座位順序決定輪莊）
+let drag=null;
+const box=$("players");
+box.addEventListener("pointerdown",e=>{
+  const g=e.target.closest(".grip");if(!g)return;
+  e.preventDefault();drag=g.closest(".p");drag.classList.add("dragging");
+  g.setPointerCapture(e.pointerId);
+});
+box.addEventListener("pointermove",e=>{
+  if(!drag)return;
+  const el=document.elementFromPoint(e.clientX,e.clientY),t=el&&el.closest(".p");
+  if(!t||t===drag||t.parentElement!==box)return;
+  const kids=[...box.children];
+  if(kids.indexOf(t)>kids.indexOf(drag))t.after(drag);else t.before(drag);
+});
+function endDrag(){
+  if(!drag)return;
+  const order=[...box.children].map(c=>+c.dataset.i);
+  drag=null;
+  S.names=order.map(i=>S.names[i]);
+  S.first=order.indexOf(S.first);
+  winner=loser=null;
+  save();render();
+}
+box.addEventListener("pointerup",endDrag);
+box.addEventListener("pointercancel",endDrag);
 
 document.querySelectorAll("#type button").forEach(b=>b.onclick=()=>{type=b.dataset.t;loser=null;render()});
 $("tai").oninput=render;
