@@ -54,6 +54,7 @@ input.name{width:100%;text-align:center}
 
 <div class="card">
   <div class="status" id="status"></div>
+  <div class="preview" id="endBanner" style="display:none;margin:0 0 10px"></div>
   <div class="players" id="players"></div>
   <div class="lbl">座位順序＝輪莊順序（東→南→西→北）。第一把誰抓到東風當莊：</div>
   <div class="row" id="first"></div>
@@ -206,13 +207,15 @@ const num=id=>Math.max(0,+$(id).value||0);
 
 // 依紀錄重播，得出目前的圈風、莊家、連莊數
 function replay(rounds=S.rounds){
-  let dealer=S.first,lian=0,rot=0;
+  let dealer=S.first,lian=0,rot=0,just=false;
   rounds.forEach(r=>{
     if(r.type==="foul")return;   // 詐胡罰款不影響輪莊
-    if(r.type==="draw"||winsOf(r).some(w=>w.winner===dealer))lian++;
-    else{dealer=(dealer+1)%4;lian=0;rot++}
+    if(r.type==="draw"||winsOf(r).some(w=>w.winner===dealer)){lian++;just=false}
+    else{dealer=(dealer+1)%4;lian=0;rot++;just=true}
   });
-  return{dealer,lian,rot,wind:WIND[Math.floor(rot/4)%4]};
+  // rot＝莊家輪了幾次；4 次一圈、16 次一將（東南西北各一圈）
+  return{dealer,lian,rot,just,wind:WIND[Math.floor(rot/4)%4],jiang:Math.floor(rot/16)+1,
+    ju:WIND[rot%4],over:rot>0&&rot%16===0&&just,last:rot%16===15};
 }
 // 刪除或修改某一局之後，重新算出每一局當時的莊家、連莊、圈風
 function normalize(){
@@ -437,7 +440,25 @@ function renderSettle(){
 
 function render(){
   const st=replay(),bal=balances();
-  $("status").textContent=`${st.wind}風圈　莊家：${S.names[st.dealer]}${st.lian?`（連莊 ${st.lian}）`:""}　第 ${S.rounds.filter(r=>r.type!=="foul").length+1} 局`;
+  $("status").textContent=`${st.jiang>1?`第${st.jiang}將 `:""}${st.wind}風${st.ju}　莊家：${S.names[st.dealer]}${st.lian?`（連莊 ${st.lian}）`:""}　第 ${S.rounds.filter(r=>r.type!=="foul").length+1} 局`;
+  // 一將（東南西北四圈）結束的提醒
+  const eb=$("endBanner");
+  if(st.over){
+    const nets=bal.map((v,i)=>[i,v-(+S.start||0)]).sort((a,b)=>b[1]-a[1]);
+    eb.style.display="";
+    eb.innerHTML=`🎉 <b>這一將打完了！</b>（北風北結束）<br>第一名：${S.names[nets[0][0]]} ${fmt(nets[0][1])}　最後一名：${S.names[nets[3][0]]} ${fmt(nets[3][1])}`
+      +`<div class="row" style="margin-top:8px"><button id="goSettle" class="on">看最後結算</button><button id="newJiang">開新的一將</button></div>`
+      +`<div class="hint" style="margin-top:6px">想繼續打也可以直接記下一局，會自動進入第 ${st.jiang} 將。</div>`;
+    $("goSettle").onclick=()=>$("settle").closest(".card").scrollIntoView({behavior:"smooth"});
+    $("newJiang").onclick=()=>{
+      if(!confirm("清空這一將的紀錄，開新的一將？（玩家名稱、底台保留，建議先複製結算文字）"))return;
+      S.rounds=[];editIdx=null;clearForm();save();render();
+      window.scrollTo({top:0,behavior:"smooth"});
+    };
+  }else if(st.last){
+    eb.style.display="";
+    eb.innerHTML=`⚠️ <b>最後一局：北風北</b>　莊家胡牌或流局會連莊繼續，閒家胡牌這一將就結束。`;
+  }else eb.style.display="none";
   $("players").innerHTML="";
   S.names.forEach((n,i)=>{
     const d=document.createElement("div");d.className="p"+(i===st.dealer?" dealer":"");
