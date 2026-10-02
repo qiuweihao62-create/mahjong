@@ -56,8 +56,10 @@ input.name{width:100%;text-align:center}
   <div class="status" id="status"></div>
   <div class="preview" id="endBanner" style="display:none;margin:0 0 10px"></div>
   <div class="players" id="players"></div>
-  <div class="lbl">座位順序＝輪莊順序（東→南→西→北）。第一把誰抓到東風當莊：</div>
+  <div class="lbl">座位順序＝輪莊順序（照順序輪流當莊）。第一把誰當莊：</div>
   <div class="row" id="first"></div>
+  <div class="lbl">開門的位置＝東風位（門風以這個為準，和誰當莊無關）：</div>
+  <div class="row" id="door"></div>
   <div class="row" style="margin-top:10px">
     <span class="hint">起始籌碼</span><input type="number" id="start">
     <span class="hint">底</span><input type="number" id="base">
@@ -227,6 +229,9 @@ function normalize(){
     else{dealer=(dealer+1)%4;lian=0;rot++}
   });
 }
+// 門風：以「開門的位置」為東風位，固定不隨莊家換（沒設定時，預設是第一把當莊的人）
+const doorOf=()=>S.door??S.first;
+const seatOf=i=>WIND[(i-doorOf()+4)%4];
 // 目前表單對應的牌局狀態（修改某一局時，用「那一局之前」的狀態）
 const ctx=()=>editIdx!=null?replay(S.rounds.slice(0,editIdx)):replay();
 // 一位付款人付給某位贏家多少
@@ -323,7 +328,7 @@ function renderFans(){
   winners.forEach(w=>{
     const wrap=document.createElement("div");el.appendChild(wrap);
     if(winners.length>1)wrap.style.cssText="border-top:1px solid var(--line);margin-top:12px;padding-top:2px";
-    const ft=fanList(w),seat=WIND[(w-st.dealer+4)%4];
+    const ft=fanList(w),seat=seatOf(w);
     const head=document.createElement("div");head.className="status";head.style.cssText="margin:8px 0 0;font-size:16px";
     head.textContent=`${S.names[w]}（${seat}家）：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
     wrap.appendChild(head);
@@ -462,7 +467,7 @@ function render(){
   $("players").innerHTML="";
   S.names.forEach((n,i)=>{
     const d=document.createElement("div");d.className="p"+(i===st.dealer?" dealer":"");
-    const seat=WIND[(i-st.dealer+4)%4];
+    const seat=seatOf(i);
     d.innerHTML=`<span class="badge">${i===st.dealer?"👑 莊家":"　"} · ${seat}家</span><input class="name" value="${n}"><span class="bal ${cls(bal[i]-(+S.start||0))}">${bal[i]}</span>`;
     d.querySelector("input").onchange=e=>{S.names[i]=e.target.value||("玩家"+(i+1));save();render()};
     d.dataset.i=i;
@@ -476,6 +481,12 @@ function render(){
     if(i===S.first)b.className="on";
     b.disabled=S.rounds.length>0;
     b.onclick=()=>{S.first=i;save();render()};$("first").appendChild(b);
+  });
+  $("door").innerHTML="";
+  S.names.forEach((n,i)=>{
+    const b=document.createElement("button");b.textContent=`${n}（${seatOf(i)}）`;
+    if(i===doorOf())b.className="on";
+    b.onclick=()=>{S.door=i;save();render()};$("door").appendChild(b);
   });
   $("start").value=S.start;$("base").value=S.base;$("per").value=S.per;
   $("autoDealer").checked=S.autoDealer!==false;
@@ -587,6 +598,7 @@ function endDrag(){
   const order=[...box.children].map(c=>+c.dataset.i);
   drag=null;
   S.names=order.map(i=>S.names[i]);
+  S.door=order.indexOf(doorOf());
   S.first=order.indexOf(S.first);
   clearForm();
   save();render();
