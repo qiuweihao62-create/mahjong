@@ -58,8 +58,6 @@ input.name{width:100%;text-align:center}
   <div class="players" id="players"></div>
   <div class="lbl">座位順序＝輪莊順序（照順序輪流當莊）。第一把誰當莊：</div>
   <div class="row" id="first"></div>
-  <div class="lbl">開門的位置＝東風位（門風以這個為準，和誰當莊無關）：</div>
-  <div class="row" id="door"></div>
   <div class="row" style="margin-top:10px">
     <span class="hint">起始籌碼</span><input type="number" id="start">
     <span class="hint">底</span><input type="number" id="base">
@@ -202,7 +200,7 @@ const FANS=[
 ];
 const def={names:["玩家1","玩家2","玩家3","玩家4"],start:0,base:100,per:20,first:0,rounds:[]};
 let S; try{S=Object.assign({},def,JSON.parse(localStorage.getItem(KEY)))}catch(e){S=def}
-// 每打完一將，把那一將的「起莊、開門」存進 jiangs；籌碼和各種次數橫跨所有將累積
+// 每打完一將，把那一將的「起莊」存進 jiangs；籌碼和各種次數橫跨所有將累積
 S.jiangs=S.jiangs||[];
 let type="ron",winners=[],loser=null,tile=null,manual={};
 const FOUL_REASONS=["沒過水就胡","詐胡（牌型不成立）","其他"];
@@ -236,9 +234,6 @@ function normalize(){
     else{dealer=(dealer+1)%4;lian=0;rot++}
   });
 }
-// 門風：以「開門的位置」為東風位，固定不隨莊家換（沒設定時，預設是第一把當莊的人）
-const doorOf=()=>S.door??S.first;
-const seatOf=i=>WIND[(i-doorOf()+4)%4];
 // 目前表單對應的牌局狀態（修改某一局時，用「那一局之前」的狀態）
 const ctx=()=>{
   if(editIdx==null)return replay();
@@ -339,12 +334,12 @@ function renderFans(){
   winners.forEach(w=>{
     const wrap=document.createElement("div");el.appendChild(wrap);
     if(winners.length>1)wrap.style.cssText="border-top:1px solid var(--line);margin-top:12px;padding-top:2px";
-    const ft=fanList(w),seat=seatOf(w);
+    const ft=fanList(w);
     const head=document.createElement("div");head.className="status";head.style.cssText="margin:8px 0 0;font-size:16px";
-    head.textContent=`${S.names[w]}（${seat}家）：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
+    head.textContent=`${S.names[w]}：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
     wrap.appendChild(head);
     const wi=document.createElement("div");wi.className="hint";
-    wi.textContent=`門風＝${seat}　圈風＝${st.wind}`+(seat===st.wind?"（門風圈風同一個風）":"")
+    wi.textContent=`現在是${st.wind}風圈`
       +(S.autoDealer!==false?`　莊家：${S.names[st.dealer]}，莊家台＋連莊台共 ${1+2*st.lian} 台（只加在莊家收或付的那一份，自動算）`:"");
     wrap.appendChild(wi);
     if(fanNote[w]){const nt=document.createElement("div");nt.className="hint";nt.style.color="var(--red)";nt.textContent=fanNote[w];wrap.appendChild(nt)}
@@ -354,7 +349,7 @@ function renderFans(){
       items.forEach(([name,,max=1])=>{
         const c=selOf(w)[name]||0,b=document.createElement("button");
         b.className="chip"+(c?" on":"");
-        const label=name==="門風"?`門風·${seat}`:name==="圈風"?`圈風·${st.wind}`:name;
+        const label=name==="圈風"?`圈風·${st.wind}`:name;
         b.innerHTML=`${label}${c>1?"×"+c:""}<small>${taiOf(name)}</small>`;
         b.onclick=()=>{
           const n=c+1>max?0:c+1,sel=fanSel[w]=fanSel[w]||{};
@@ -411,7 +406,7 @@ function clearForm(){winners=[];loser=null;tile=null;fanSel={};manual={};fanNote
 function startNextJiang(){
   if(!curRounds().length)return alert("這一將還沒有記錄任何一局，不用開新的一將。");
   if(!confirm(`開始第 ${S.jiangs.length+2} 將？\n籌碼和放槍、胡牌、自摸的次數會繼續累積，莊家、連莊、圈風會重新開始。`))return;
-  S.jiangs.push({first:S.first,door:doorOf()});
+  S.jiangs.push({first:S.first});
   editIdx=null;clearForm();save();render();
   window.scrollTo({top:0,behavior:"smooth"});
 }
@@ -419,7 +414,7 @@ function startNextJiang(){
 function undoNextJiang(){
   if(!S.jiangs.length||curRounds().length)return;
   const p=S.jiangs.pop();
-  S.first=p.first;S.door=p.door;
+  S.first=p.first;
   editIdx=null;clearForm();save();render();
 }
 // 把某一局載回表單修改
@@ -486,7 +481,7 @@ function render(){
     $("newJiang").onclick=startNextJiang;
   }else if(S.jiangs.length&&!cur.length){
     eb.style.display="";
-    eb.innerHTML=`🆕 <b>已進入第 ${S.jiangs.length+1} 將</b>，籌碼和次數接續上一將累積。<br>請先在下面選「第一把誰當莊」和「開門的位置」。<div class="row" style="margin-top:8px"><button id="undoJiang">取消，回到上一將</button></div>`;
+    eb.innerHTML=`🆕 <b>已進入第 ${S.jiangs.length+1} 將</b>，籌碼和次數接續上一將累積。<br>請先在下面選「第一把誰當莊」。<div class="row" style="margin-top:8px"><button id="undoJiang">取消，回到上一將</button></div>`;
     $("undoJiang").onclick=undoNextJiang;
   }else if(st.last){
     eb.style.display="";
@@ -495,8 +490,7 @@ function render(){
   $("players").innerHTML="";
   S.names.forEach((n,i)=>{
     const d=document.createElement("div");d.className="p"+(i===st.dealer?" dealer":"");
-    const seat=seatOf(i);
-    d.innerHTML=`<span class="badge">${i===st.dealer?"👑 莊家":"　"} · ${seat}家</span><input class="name" value="${n}"><span class="bal ${cls(bal[i]-(+S.start||0))}">${bal[i]}</span>`;
+    d.innerHTML=`<span class="badge">${i===st.dealer?"👑 莊家":"　"}</span><input class="name" value="${n}"><span class="bal ${cls(bal[i]-(+S.start||0))}">${bal[i]}</span>`;
     d.querySelector("input").onchange=e=>{S.names[i]=e.target.value||("玩家"+(i+1));save();render()};
     d.dataset.i=i;
     if(!S.rounds.length)d.insertAdjacentHTML("afterbegin",'<span class="grip">⠿ 按住拖曳</span>');
@@ -509,12 +503,6 @@ function render(){
     if(i===S.first)b.className="on";
     b.disabled=cur.length>0;
     b.onclick=()=>{S.first=i;save();render()};$("first").appendChild(b);
-  });
-  $("door").innerHTML="";
-  S.names.forEach((n,i)=>{
-    const b=document.createElement("button");b.textContent=`${n}（${seatOf(i)}）`;
-    if(i===doorOf())b.className="on";
-    b.onclick=()=>{S.door=i;save();render()};$("door").appendChild(b);
   });
   $("start").value=S.start;$("base").value=S.base;$("per").value=S.per;
   $("autoDealer").checked=S.autoDealer!==false;
@@ -626,7 +614,6 @@ function endDrag(){
   const order=[...box.children].map(c=>+c.dataset.i);
   drag=null;
   S.names=order.map(i=>S.names[i]);
-  S.door=order.indexOf(doorOf());
   S.first=order.indexOf(S.first);
   clearForm();
   save();render();
