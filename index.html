@@ -102,7 +102,11 @@ input.name{width:100%;text-align:center}
     <button id="undo">復原上一局</button>
   </div>
   <div id="detailBox">
-    <details id="fanDetails" style="margin-top:14px">
+    <details id="tileDetails" style="margin-top:14px">
+      <summary id="tileSum" style="cursor:pointer;font-size:15px">胡的牌（選填）</summary>
+      <div class="tiles" id="tiles" style="margin-top:8px"></div>
+    </details>
+    <details id="fanDetails" style="margin-top:8px">
       <summary id="fanSum" style="cursor:pointer;font-size:15px">牌型（選填）</summary>
       <div class="hint" style="margin-top:6px">點牌型會自動加進上面的台數（有「×」的可連點增加數量）。花牌：點幾下就是幾朵。莊家台、連莊台由程式自動算，不用點。「門清一摸三」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）點新的會自動取消舊的。雙響、三響：放槍時選多位贏家，各自點自己的牌型；莊家有胡就連莊。</div>
       <div id="fans"></div>
@@ -118,10 +122,6 @@ input.name{width:100%;text-align:center}
           <button id="cfAdd">新增</button>
         </div>
       </details>
-    </details>
-    <details id="tileDetails" style="margin-top:8px">
-      <summary id="tileSum" style="cursor:pointer;font-size:15px">胡的牌（選填）</summary>
-      <div class="tiles" id="tiles" style="margin-top:8px"></div>
     </details>
   </div>
 </div>
