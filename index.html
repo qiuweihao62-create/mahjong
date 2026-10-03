@@ -34,6 +34,15 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 input[type=number]{width:80px}
 input.name{width:100%;text-align:center}
+.qbox{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qtop b{font-size:17px}
+.qtop small{color:var(--mute);margin-left:6px}
+.qstep{display:flex;align-items:center;gap:8px}
+.qval{min-width:62px;text-align:center;font-size:26px;font-weight:700;line-height:1}
+.qval small{font-size:13px;font-weight:400;color:var(--mute)}
+.qnums{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px}
+.qb{height:46px;min-width:46px;font-size:20px;padding:0}
 .fgrp{margin:8px 0 2px;font-size:13px;color:var(--mute)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:4px 10px;font-size:14px}
@@ -82,32 +91,38 @@ input.name{width:100%;text-align:center}
   <div id="winBox"><div class="lbl" id="winLbl">胡牌的人</div><div class="row" id="winner"></div></div>
   <div id="loserBox"><div class="lbl">放槍的人</div><div class="row" id="loser"></div></div>
   <div id="foulBox"><div class="lbl">詐胡原因</div><div class="row" id="foulReasons"></div></div>
-  <div id="tileBox">
-    <div class="lbl">胡的牌：<b id="tileShow">未選</b></div>
-    <div class="tiles" id="tiles"></div>
-  </div>
-  <div id="taiBox">
-    <div class="lbl">胡的牌型（先選贏家；點一下選取，有「×」的可連點增加數量）</div>
-    <div id="fans"></div>
-    <div class="hint">花牌：點幾下就是幾朵。莊家台、連莊台由程式自動算，不用點。「門清一摸三」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）點新的會自動取消舊的。雙響、三響：放槍時選多位贏家，各自點自己的牌型；莊家有胡就連莊。</div>
-    <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">牌型台數設定（規則不同可自己改）</summary>
-      <div id="fanCfg"></div>
-      <button id="fanReset" style="margin-top:8px">還原預設台數</button>
-      <div class="lbl">新增自訂牌型（你們自己的玩法）</div>
-      <div class="row">
-        <input id="cfName" placeholder="名稱" style="width:100px">
-        <input type="number" id="cfTai" placeholder="台數" min="0" style="width:70px">
-        <select id="cfGroup"></select>
-        <input type="number" id="cfMax" placeholder="最多點幾次" min="1" value="1" style="width:100px">
-        <button id="cfAdd">新增</button>
-      </div>
-    </details>
+  <div id="quickBox">
+    <div class="lbl">台數（0～5 直接按，更大的用 ＋ ／ －）</div>
+    <div id="quick"></div>
   </div>
   <div class="preview" id="preview"></div>
   <div class="row" style="margin-top:12px">
     <button id="save" class="on">記錄</button>
     <button id="cancelEdit" style="display:none">取消修改</button>
     <button id="undo">復原上一局</button>
+  </div>
+  <div id="detailBox">
+    <details id="fanDetails" style="margin-top:14px">
+      <summary id="fanSum" style="cursor:pointer;font-size:15px">牌型（選填）</summary>
+      <div class="hint" style="margin-top:6px">點牌型會自動加進上面的台數（有「×」的可連點增加數量）。花牌：點幾下就是幾朵。莊家台、連莊台由程式自動算，不用點。「門清一摸三」已含門清＋自摸；互相衝突的牌型（如混一色和清一色）點新的會自動取消舊的。雙響、三響：放槍時選多位贏家，各自點自己的牌型；莊家有胡就連莊。</div>
+      <div id="fans"></div>
+      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">牌型台數設定（規則不同可自己改）</summary>
+        <div id="fanCfg"></div>
+        <button id="fanReset" style="margin-top:8px">還原預設台數</button>
+        <div class="lbl">新增自訂牌型（你們自己的玩法）</div>
+        <div class="row">
+          <input id="cfName" placeholder="名稱" style="width:100px">
+          <input type="number" id="cfTai" placeholder="台數" min="0" style="width:70px">
+          <select id="cfGroup"></select>
+          <input type="number" id="cfMax" placeholder="最多點幾次" min="1" value="1" style="width:100px">
+          <button id="cfAdd">新增</button>
+        </div>
+      </details>
+    </details>
+    <details id="tileDetails" style="margin-top:8px">
+      <summary id="tileSum" style="cursor:pointer;font-size:15px">胡的牌（選填）</summary>
+      <div class="tiles" id="tiles" style="margin-top:8px"></div>
+    </details>
   </div>
 </div>
 
@@ -293,9 +308,10 @@ const taiOf=name=>{
 };
 const selOf=w=>fanSel[w]||{};
 const fanTai=w=>Object.entries(selOf(w)).reduce((s,[n,c])=>s+c*taiOf(n),0);
-const totalTai=w=>fanTai(w)+(manual[w]||0);
+const totalTai=w=>Math.max(0,fanTai(w)+(manual[w]||0));   // 手動可以是負數（把台數往下調）
 const fanList=w=>Object.entries(selOf(w)).filter(([,c])=>c>0);
 const fanText=l=>(l||[]).map(([n,c])=>c>1?`${n}×${c}`:n).join("、");
+const extraText=x=>x?(x>0?`＋手動${x}`:`－手動${-x}`):"";
 const winData=w=>({winner:w,tai:totalTai(w),fans:fanList(w),extra:manual[w]||0});
 // 一局的所有贏家（雙響、三響有多位；舊紀錄只有一位）
 const winsOf=r=>r.type==="draw"||r.type==="foul"?[]:r.wins||[{winner:r.winner,tai:r.tai,fans:r.fans||[],extra:r.extra||0}];
@@ -336,7 +352,7 @@ function renderFans(){
     if(winners.length>1)wrap.style.cssText="border-top:1px solid var(--line);margin-top:12px;padding-top:2px";
     const ft=fanList(w);
     const head=document.createElement("div");head.className="status";head.style.cssText="margin:8px 0 0;font-size:16px";
-    head.textContent=`${S.names[w]}：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${manual[w]?`＋手動${manual[w]}`:""}）`:"");
+    head.textContent=`${S.names[w]}：${totalTai(w)} 台`+(ft.length?`（${fanText(ft)}${extraText(manual[w])}）`:"");
     wrap.appendChild(head);
     const wi=document.createElement("div");wi.className="hint";
     wi.textContent=`現在是${st.wind}風圈`
@@ -364,13 +380,34 @@ function renderFans(){
       });
     });
     const mr=document.createElement("div");mr.className="row";mr.style.marginTop="10px";
-    mr.innerHTML=`<span class="hint">另外手動加</span><input type="number" min="0" placeholder="0" value="${manual[w]||""}" data-man="${w}"><span class="hint">台</span><button>清除牌型</button>`;
-    mr.querySelector("input").oninput=e=>{
-      manual[w]=Math.max(0,+e.target.value||0);render();
-      const n=document.querySelector(`[data-man="${w}"]`);if(n)n.focus();
-    };
+    mr.innerHTML=`<button>清除牌型</button>`;
     mr.querySelector("button").onclick=()=>{delete fanSel[w];delete fanNote[w];render()};
     wrap.appendChild(mr);
+  });
+}
+// 台數：0～5 直接按，更大的用 ＋ ／ －（牌型的台數會自動算進去）
+function renderQuick(){
+  const el=$("quick");el.innerHTML="";
+  if(!winners.length){el.innerHTML='<div class="hint">先選贏家，再按台數。</div>';return}
+  winners.forEach(w=>{
+    const t=totalTai(w),ft=fanTai(w);
+    const box=document.createElement("div");box.className="qbox";
+    const top=document.createElement("div");top.className="qtop";
+    top.innerHTML=`<span><b>${S.names[w]}</b>${ft?`<small>含牌型 ${ft} 台</small>`:""}</span>`;
+    const step=document.createElement("div");step.className="qstep";
+    const mk=(txt,d)=>{
+      const b=document.createElement("button");b.className="qb";b.textContent=txt;
+      b.onclick=()=>{manual[w]=Math.max(0,t+d)-fanTai(w);render()};return b;
+    };
+    const val=document.createElement("span");val.className="qval";val.innerHTML=`${t}<small> 台</small>`;
+    step.append(mk("－",-1),val,mk("＋",1));
+    top.appendChild(step);box.appendChild(top);
+    const nums=document.createElement("div");nums.className="qnums";
+    for(let n=0;n<=5;n++){
+      const b=document.createElement("button");b.textContent=n;b.className="qb"+(t===n?" on":"");
+      b.onclick=()=>{manual[w]=n-fanTai(w);render()};nums.appendChild(b);
+    }
+    box.appendChild(nums);el.appendChild(box);
   });
 }
 function buildCfg(){
@@ -401,7 +438,10 @@ function draftRound(){
   return{type,loser,dealer:st.dealer,lian:st.lian,wins:winners.map(winData)};
 }
 const gameLabel=i=>S.rounds[i].type==="foul"?"這筆詐胡":`第 ${S.rounds.slice(0,i+1).filter(x=>x.type!=="foul").length} 局`;
-function clearForm(){winners=[];loser=null;tile=null;fanSel={};manual={};fanNote={}}
+function clearForm(){
+  winners=[];loser=null;tile=null;fanSel={};manual={};fanNote={};
+  $("fanDetails").open=false;$("tileDetails").open=false;   // 牌型和牌預設收起來
+}
 // 開新的一將：籌碼和次數繼續累積，只有莊家、連莊、圈風重新開始
 function startNextJiang(){
   if(!curRounds().length)return alert("這一將還沒有記錄任何一局，不用開新的一將。");
@@ -426,6 +466,8 @@ function editRound(i){
   else winners=winsOf(r).map(w=>w.winner);
   winsOf(r).forEach(w=>{fanSel[w.winner]=Object.fromEntries(w.fans||[]);manual[w.winner]=w.extra||0});
   editIdx=i;render();
+  $("fanDetails").open=winsOf(r).some(w=>(w.fans||[]).length>0);
+  $("tileDetails").open=!!r.tile;
   $("type").scrollIntoView({behavior:"smooth",block:"center"});
 }
 function delRound(i){
@@ -511,7 +553,7 @@ function render(){
   document.querySelectorAll("#type button").forEach(b=>b.className=b.dataset.t===type?"on":"");
   const draw=type==="draw",tsumo=type==="tsumo",foul=type==="foul",single=tsumo||foul;
   $("winBox").style.display=draw?"none":"";
-  $("tileBox").style.display=$("taiBox").style.display=(draw||foul)?"none":"";
+  $("quickBox").style.display=$("detailBox").style.display=(draw||foul)?"none":"";
   $("loserBox").style.display=type==="ron"?"":"none";
   $("foulBox").style.display=foul?"":"none";
   $("winLbl").textContent=foul?"詐胡的人":tsumo?"自摸的人":"胡牌的人（雙響、三響可以選多人）";
@@ -533,12 +575,14 @@ function render(){
     render();
   });
   pickRow($("loser"),loser,i=>{loser=i;winners=winners.filter(x=>x!==i);render()},null);
-  $("tileShow").innerHTML=tile?`<span style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${tileSVG(tile,40)}${tile}</span>`:"未選";
+  $("tileSum").innerHTML=tile?`胡的牌（選填）：<span style="display:inline-flex;align-items:center;gap:6px;vertical-align:middle">${tileSVG(tile,30)}${tile}</span>`:"胡的牌（選填）";
+  const fs=winners.map(w=>fanList(w).length?`${winners.length>1?S.names[w]+" ":""}${fanText(fanList(w))}`:"").filter(Boolean).join("；");
+  $("fanSum").textContent="牌型（選填）"+(fs?`：${fs}`:"");
   $("tiles").innerHTML="";
   TILES.forEach(t=>{const b=document.createElement("button");b.innerHTML=tileSVG(t);b.title=t;b.setAttribute("aria-label",t);if(t===tile)b.className="on";
     b.onclick=()=>{tile=t;render()};$("tiles").appendChild(b)});
 
-  renderFans();
+  renderFans();renderQuick();
 
   // 預覽
   let pv="";const cx=ctx();
@@ -585,7 +629,7 @@ function render(){
       :r.type==="ron"?`${S.names[r.loser]} 放槍給 ${ws.map(w=>S.names[w.winner]).join("、")}${multi}`
       :r.type==="tsumo"?`${S.names[ws[0].winner]} 自摸`:"流局";
     const extra=(r.type==="draw"||r.type==="foul")?"":ws.map(w=>{const ft=fanText(w.fans);
-      return`<br><span class="hint">${ws.length>1?S.names[w.winner]+" ":""}${w.tai} 台${ft?`（${ft}${w.extra?`＋手動${w.extra}`:""}）`:""}</span>`}).join("");
+      return`<br><span class="hint">${ws.length>1?S.names[w.winner]+" ":""}${w.tai} 台${ft?`（${ft}${extraText(w.extra)}）`:""}</span>`}).join("");
     const ch=r.type==="draw"?"—":d.map((v,i)=>v?`<span class="${cls(v)}">${S.names[i]} ${fmt(v)}</span>`:"").filter(Boolean).join("<br>");
     tr.innerHTML=`<td>${n??"罰"}</td><td>${S.jiangs.length?`第${(r.jiang||0)+1}將<br>`:""}${r.wind}風<br>${S.names[r.dealer]}莊${r.lian?`連${r.lian}`:""}</td><td>${txt}${extra}</td><td>${r.tile?tileSVG(r.tile,34):""}</td><td>${ch}</td><td style="white-space:nowrap"><button data-e>修改</button> <button class="danger" data-d>刪除</button></td>`;
     tr.querySelector("[data-e]").onclick=()=>editRound(idx);
@@ -650,7 +694,6 @@ $("save").onclick=()=>{
   else if(!dr){
     if(!winners.length)return alert("請選贏家");
     if(type==="ron"&&loser===null)return alert("請選放槍的人");
-    if(!tile)return alert("請選胡的牌");
   }
   const rec={type,winner:dr||fl?null:winners[0],loser:type==="ron"?loser:null,tile:dr||fl?null:tile,
     wins:dr||fl?[]:winners.map(winData),
@@ -672,7 +715,7 @@ $("csv").onclick=()=>{
     const ws=winsOf(r),f=r.type==="foul";if(!f)gn++;
     rows.push([(r.jiang||0)+1,f?"罰":gn,r.time,r.wind,S.names[r.dealer],r.lian,{ron:"放槍",tsumo:"自摸",draw:"流局",foul:"詐胡"}[r.type],
       ws.map(w=>S.names[w.winner]).join("/"),f?S.names[r.offender]:(r.loser==null?"":S.names[r.loser]),r.tile||"",ws.map(w=>w.tai).join("/"),
-      f?r.reason:ws.map(w=>(ws.length>1?S.names[w.winner]+":":"")+fanText(w.fans)+(w.extra?`＋手動${w.extra}`:"")).join("；"),...delta(r)]);
+      f?r.reason:ws.map(w=>(ws.length>1?S.names[w.winner]+":":"")+fanText(w.fans)+extraText(w.extra)).join("；"),...delta(r)]);
   });
   const csv="﻿"+rows.map(r=>r.join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
